@@ -6,7 +6,7 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from repositories.auth_repository import create_access_token, verify_token
 from pydantic import BaseModel
 from typing import Optional
-
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
 
@@ -28,6 +28,19 @@ class TokenResponse(BaseModel):
 # Define the OAuth2PasswordBearer scheme, which tells FastAPI where to get the token from
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
+# Configure CORS
+origins = [
+    "http://localhost:5173",  # Your React app URL
+    # You can add more origins if needed
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,  # List of allowed origins
+    allow_credentials=True,  # Allow cookies and credentials
+    allow_methods=["*"],     # Allow all HTTP methods
+    allow_headers=["*"],     # Allow all headers
+)
+
 # Signup Route
 @app.post("/signup", response_model=UserResponse)
 def signup(user: UserCreate, db: Session = Depends(get_db)):
@@ -48,6 +61,7 @@ async def root():
 @app.post("/login")
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     user = get_user_by_email(db, form_data.username)
+    # user = get_user_by_username(db, form_data.username)
     if not user:
         raise HTTPException(status_code=400, detail="Invalid username or password")
     
@@ -56,7 +70,7 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
     
     # Create a JWT token for the authenticated user
     access_token = create_access_token(data={"sub": user.email})
-    return {"access_token": access_token, "token_type": "bearer"}
+    return {"access_token": access_token, "token_type": "bearer", "user_name": user.username, "user_mail": user.email}
 
 # Protected route - Requires a valid JWT token
 @app.get("/", response_model=TokenResponse)
