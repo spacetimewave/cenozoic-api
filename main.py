@@ -20,6 +20,8 @@ class UserResponse(BaseModel):
     id: int
     username: str
     email: str
+    access_token: str
+    token_type: str
 
 class TokenResponse(BaseModel):
     message: str
@@ -50,7 +52,10 @@ def signup(user: UserCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Username or email is already registered")
     # Create the user
     new_user = create_user(db, user.username, user.email, user.password)
-    return UserResponse(id=new_user.id, username=new_user.username, email=new_user.email)
+    # Create a JWT token for the authenticated user
+    access_token = create_access_token(data={"sub": user.email})
+
+    return UserResponse(id=new_user.id, username=new_user.username, email=new_user.email, access_token= access_token, token_type="bearer")
 
 # Root route for testing
 @app.get("/root")
