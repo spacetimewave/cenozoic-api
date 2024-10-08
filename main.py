@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from controllers.auth import auth_router  # Import the auth router from the auth controller
+from controllers.auth import auth_router  # Import the auth router
+from controllers.docker import docker_router  # Import the docker router
 
 app = FastAPI()
 
@@ -17,8 +18,9 @@ app.add_middleware(
     allow_headers=["*"],     # Allow all headers
 )
 
-# Include the authentication routes from the auth controller
+# Include the authentication and docker routes
 app.include_router(auth_router)
+app.include_router(docker_router)
 
 # Root route for testing
 @app.get("/root")
