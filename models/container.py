@@ -6,8 +6,9 @@ import enum
 from sqlalchemy import Enum as SqlEnum 
 
 class ContainerStatus(enum.Enum):
-    stopped = "stopped"
+    exited = "exited"
     running = "running"
+    created = "created"
 
 class Container(Base):
     __tablename__ = "containers"
@@ -16,7 +17,7 @@ class Container(Base):
     container_id = Column(String, unique=True, index=True)  # Docker container ID
     container_name = Column(String)
     user_id = Column(Integer, ForeignKey("users.id"))
-    status = Column(SqlEnum(ContainerStatus), default=ContainerStatus.stopped, nullable=False)
+    status = Column(SqlEnum(ContainerStatus), default=ContainerStatus.created, nullable=False)
 
     # Define the relationship back to User
     owner = relationship("User", back_populates="containers")
