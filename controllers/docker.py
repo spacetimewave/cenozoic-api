@@ -74,3 +74,41 @@ def list_user_containers(token: str = Depends(oauth2_scheme), db: Session = Depe
         return {"containers": containers}
     else:
         raise HTTPException(status_code=404, detail="User not found.")
+
+@docker_router.delete("/docker/delete-container/{container_id}")
+def delete_user_container(container_id: str, token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    """
+    Delete a Docker container associated with a user.
+    """
+    print(container_id)
+    token_payload = verify_token(token)
+    
+    if token_payload is None:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    
+    user = token_payload.get('sub')
+    
+    user = get_user_by_email(db, user)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    print(container_id)
+    print(user.id)
+    
+    container = db.query(Container).filter(Container.container_id == container_id, Container.user_id == user.id).first()
+    if not container:
+        raise HTTPException(status_code=404, detail="Container not found or does not belong to the user")
+    
+    try:
+        docker_container = client.containers.get(container.container_id)
+        docker_container.stop()
+        docker_container.remove()
+        
+        db.delete(container)
+        db.commit()
+        
+        return {"message": "Container deleted successfully"}
+    except docker.errors.NotFound:
+        raise HTTPException(status_code=404, detail="Docker container not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error deleting container: {str(e)}")
