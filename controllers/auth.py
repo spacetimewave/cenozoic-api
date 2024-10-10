@@ -55,6 +55,7 @@ class TokenResponse(BaseModel):
 @auth_router.get("/", response_model=TokenResponse)
 async def root(token: str = Depends(oauth2_scheme)):
     payload = verify_token(token)
+    print(payload)
     if payload is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
     print(payload)

@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from models.container import Container
 from repositories.database_repository import get_db, get_user_by_email
+from controllers.auth import oauth2_scheme
 
 from repositories.auth_repository import verify_token
 
@@ -16,15 +17,16 @@ class StartContainerRequest(BaseModel):
     token: str
 
 @docker_router.post("/docker/start-container")
-def start_container(req:StartContainerRequest, db: Session = Depends(get_db)):
+def start_container(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     """
     Start a Docker container with the specified image.
     :param image_name: The name of the Docker image to use (e.g., "nginx", "ubuntu")
     """
     try:
-        success = verify_token(req.token, req.user_mail)
+        print(token)
+        payload = verify_token(token)
 
-        if success == False: 
+        if payload == None: 
             return {"message": "Invalid credentials"}
 
         IMAGE_NAME = "javierhersan/code-ai"
@@ -34,7 +36,7 @@ def start_container(req:StartContainerRequest, db: Session = Depends(get_db)):
         # Start a container with the image
         container = client.containers.run(IMAGE_NAME, detach=True)
 
-        user = get_user_by_email(db, req.user_mail)
+        user = get_user_by_email(db, payload.get('sub'))
         if user:
             new_container = Container(
                 container_id=container.id, 
@@ -55,16 +57,18 @@ def start_container(req:StartContainerRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Error starting container: {str(e)}")
 
 @docker_router.get("/docker/user-containers")
-def list_user_containers(req: StartContainerRequest, db: Session = Depends(get_db)):
+def list_user_containers(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     """
     List all containers associated with a user.
     """
-    success = verify_token(req.token, req.user_mail)
-
-    if success == False: 
+    token_payload = verify_token(token)
+    
+    if token_payload == None: 
         return {"message": "Invalid credentials"}
     
-    user = get_user_by_email(db, req.user_mail)
+    user = token_payload.get('sub')
+    
+    user = get_user_by_email(db, user)
     if user:
         containers = db.query(Container).filter(Container.user_id == user.id).all()
         return {"containers": containers}
