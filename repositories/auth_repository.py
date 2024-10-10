@@ -1,5 +1,6 @@
 import jwt
 from datetime import datetime, timedelta
+import time
 
 # Secret key for JWT signing and encoding
 SECRET_KEY = "your_jwt_secret_key"
@@ -15,12 +16,13 @@ def create_access_token(data: dict):
     return encoded_jwt
 
 # Function to decode the JWT token
-def verify_token(token: str):
+def verify_token(token: str, user_mail: str)-> bool:
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        print(payload)
-        return payload
+        if payload.get('sub') != user_mail:
+            return False 
+        return True
     except jwt.ExpiredSignatureError:
-        return None  # Token expired
+        return False  # Token expired
     except jwt.InvalidTokenError:
-        return None  # Invalid token
+        return False  # Invalid token

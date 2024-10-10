@@ -1,7 +1,9 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm import Session
+from models.container import Container
 from models.user import User
+from models.base import Base  # Import the shared Base
 import hashlib
 
 
@@ -10,6 +12,11 @@ SQLALCHEMY_DATABASE_URL = "sqlite:///./test.db"
 engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# Create database tables
+# User.metadata.create_all(bind=engine)
+# Container.metadata.create_all(bind=engine)
+Base.metadata.create_all(bind=engine)
 
 # Dependency to get DB session
 def get_db():
@@ -46,5 +53,3 @@ def get_user_by_email_or_username(db: Session, email: str, username: str):
 def get_user_by_email(db: Session, email: str):
     return db.query(User).filter(User.email == email).first()
 
-# Create database tables
-User.metadata.create_all(bind=engine)
