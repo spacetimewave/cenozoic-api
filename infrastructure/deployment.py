@@ -53,5 +53,5 @@ if __name__ == "__main__":
     # 3. Push the Docker image to Docker Hub
     push_image()
     # 4. Deploy the Docker image locally
-    deploy_container()
+    # deploy_container()
 
