@@ -1,10 +1,11 @@
 import docker
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from models.container import Container
 from repositories.database_repository import get_db, get_user_by_email
 from controllers.auth import oauth2_scheme
+import asyncio
 
 from repositories.auth_repository import verify_token
 
@@ -213,3 +214,61 @@ def exec_command(container_id: str, exec_request: ExecCommandRequest, token: str
         raise HTTPException(status_code=404, detail="Docker container not found")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error executing command: {str(e)}")
+
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: list[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
+
+    async def send_personal_message(self, message: str, websocket: WebSocket):
+        await websocket.send_text(message)
+
+    async def broadcast(self, message: str):
+        for connection in self.active_connections:
+            await connection.send_text(message)
+
+manager = ConnectionManager()
+
+@docker_router.websocket("/docker-ws/{container_id}")
+async def websocket_endpoint(websocket: WebSocket, container_id: str):
+    await manager.connect(websocket)
+    try:
+        container = client.containers.get(container_id) 
+        exec_instance = container.exec_run("/bin/sh", stdin=True, stdout=True, stderr=True, tty=True, detach=False, stream=True)
+        output_stream = exec_instance.output
+
+        async def read_from_container():
+            for output in output_stream:
+                await websocket.send_text(output.decode('utf-8'))
+
+        async def write_to_container(input_data):
+            exec_instance.input.write(input_data.encode('utf-8'))
+
+        # read_task = asyncio.create_task(read_from_container())
+        
+        while True:
+            try:
+                # Receive data from frontend terminal (xterm)
+                data = await websocket.receive_text()
+                print(data)
+                # Send the received data to the Docker container
+                await write_to_container(data)
+            except WebSocketDisconnect:
+                manager.disconnect(websocket)
+                break
+
+        # Clean up when WebSocket disconnects
+        # read_task.cancel()
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+    except Exception as e:
+        await manager.disconnect(websocket)
+
+
+
