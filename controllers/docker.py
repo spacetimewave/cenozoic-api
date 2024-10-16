@@ -240,23 +240,26 @@ async def websocket_endpoint(websocket: WebSocket, container_id: str):
     await manager.connect(websocket)
     try:
         container = client.containers.get(container_id) 
-        exec_instance = container.exec_run("/bin/sh", stdin=True, stdout=True, stderr=True, tty=True, detach=False, stream=True)
+        exec_instance = container.exec_run("/bin/sh", stdin=True, stdout=True, stderr=True, tty=True, detach=False, stream=True, socket=True)
         output_stream = exec_instance.output
 
         async def read_from_container():
+            print("output")
             for output in output_stream:
+                print("output of container: ", output.decode('utf-8'))
                 await websocket.send_text(output.decode('utf-8'))
 
         async def write_to_container(input_data):
-            exec_instance.input.write(input_data.encode('utf-8'))
+            print("writting to container: ", input_data, output_stream)
+            exec_instance.output.send(input_data.encode('utf-8'))
+            # exec_instance.output._sock.send(input_data.encode('utf-8'))
 
-        # read_task = asyncio.create_task(read_from_container())
-        
+        read_task = asyncio.create_task(read_from_container())
+        print("WebSocket connected")
         while True:
             try:
                 # Receive data from frontend terminal (xterm)
                 data = await websocket.receive_text()
-                print(data)
                 # Send the received data to the Docker container
                 await write_to_container(data)
             except WebSocketDisconnect:
@@ -264,7 +267,7 @@ async def websocket_endpoint(websocket: WebSocket, container_id: str):
                 break
 
         # Clean up when WebSocket disconnects
-        # read_task.cancel()
+        read_task.cancel()
     except WebSocketDisconnect:
         manager.disconnect(websocket)
     except Exception as e:
