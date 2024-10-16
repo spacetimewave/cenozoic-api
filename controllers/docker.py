@@ -242,17 +242,29 @@ async def websocket_endpoint(websocket: WebSocket, container_id: str):
         container = client.containers.get(container_id) 
         exec_instance = container.exec_run("/bin/sh", stdin=True, stdout=True, stderr=True, tty=True, detach=False, stream=True, socket=True)
         output_stream = exec_instance.output
+        data = ''
 
         async def read_from_container():
-            print("output")
-            for output in output_stream:
-                print("output of container: ", output.decode('utf-8'))
-                await websocket.send_text(output.decode('utf-8'))
+            try:
+                print("Starting to read from container")
+                while True:
+                    output = await asyncio.to_thread(output_stream.recv, 4096)
+                    if not output:
+                        break
+                    decoded_output = output.decode('utf-8')
+                    print("Output of container: ", decoded_output)
+                    print("Data: ", data.strip())
+                    if decoded_output.strip() != data.strip():
+                        await websocket.send_text(decoded_output)
+            except Exception as e:
+                print(f"Error reading from container: {e}")
 
         async def write_to_container(input_data):
-            print("writting to container: ", input_data, output_stream)
-            exec_instance.output.send(input_data.encode('utf-8'))
-            # exec_instance.output._sock.send(input_data.encode('utf-8'))
+            try:
+                print("Writing to container: ", input_data)
+                await asyncio.to_thread(exec_instance.output.send, input_data.encode('utf-8'))
+            except Exception as e:
+                print(f"Error writing to container: {e}")
 
         read_task = asyncio.create_task(read_from_container())
         print("WebSocket connected")
