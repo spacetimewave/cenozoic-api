@@ -1,3 +1,5 @@
+import io
+import tarfile
 import docker
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
@@ -288,6 +290,7 @@ def get_filesystem(container_id: str, token: str = Depends(oauth2_scheme), db: S
         
         files = []
         for item in directories_output:
+            item = item.strip() 
             parent_path = '/'.join(item.split('/')[:-1]) or None
             files.append(FileSystemItem(
                 name=item.split('/')[-1],
@@ -300,6 +303,7 @@ def get_filesystem(container_id: str, token: str = Depends(oauth2_scheme), db: S
                 isOpen=False
             ))
         for item in files_output:
+            item = item.strip() 
             parent_path = '/'.join(item.split('/')[:-1]) or None
             files.append(FileSystemItem(
                 name=item.split('/')[-1],
@@ -357,3 +361,53 @@ def get_file_content(container_id: str, file_path: str, token: str = Depends(oau
         raise HTTPException(status_code=404, detail="Docker container not found")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error retrieving file content: {str(e)}")
+    
+class SaveContainerFile(BaseModel):
+    container_id: str
+    name: str
+    parent_path: str
+    content: str
+    
+@docker_router.post("/docker/save-file-content")
+def save_file_content(req:SaveContainerFile, token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    token_payload = verify_token(token)
+    if token_payload is None:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    
+    user = token_payload.get('sub')
+    user = get_user_by_email(db, user)
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    container = db.query(Container).filter(Container.container_id == req.container_id, Container.user_id == user.id).first()
+    if not container:
+        raise HTTPException(status_code=404, detail="Container not found or does not belong to the user")
+    
+    try:
+        docker_container = client.containers.get(container.container_id)
+        
+        if docker_container.status != 'running':
+            raise HTTPException(status_code=400, detail="Container is not running")
+        
+        # Normalize newlines to Unix-style
+        normalized_content = req.content.replace('\r\n', '\n')
+
+        # Create an in-memory tar archive containing the file
+        tar_stream = io.BytesIO()
+        with tarfile.open(fileobj=tar_stream, mode='w') as tar:
+            tarinfo = tarfile.TarInfo(name=req.name)
+            tarinfo.size = len(normalized_content.encode('utf-8'))
+            tar.addfile(tarinfo, io.BytesIO(normalized_content.encode('utf-8')))
+        tar_stream.seek(0)
+        
+        # Upload the tar archive to the Docker container
+        docker_container.put_archive(path=req.parent_path, data=tar_stream)
+        
+        return {"message": "File content saved successfully"}
+
+    except docker.errors.NotFound:
+        raise HTTPException(status_code=404, detail="Docker container not found")
+    except Exception as e:
+
+        raise HTTPException(status_code=500, detail=f"Error saving file content: {str(e)}")
