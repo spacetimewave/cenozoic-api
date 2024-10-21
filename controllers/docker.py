@@ -6,6 +6,7 @@ from models.container import Container
 from repositories.database_repository import get_db, get_user_by_email
 from controllers.auth import oauth2_scheme
 import asyncio
+from typing import Optional
 
 from repositories.auth_repository import verify_token
 
@@ -173,48 +174,6 @@ def delete_user_container(container_id: str, token: str = Depends(oauth2_scheme)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error deleting container: {str(e)}")
 
-class ExecCommandRequest(BaseModel):
-    command: str  # Command to be executed in the container
-
-@docker_router.post("/docker/exec-command/{container_id}")
-def exec_command(container_id: str, exec_request: ExecCommandRequest, token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
-    """
-    Execute a command inside a running Docker container.
-    """
-    token_payload = verify_token(token)
-
-    if token_payload is None:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-    
-    user = token_payload.get('sub')
-    user = get_user_by_email(db, user)
-    
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    container = db.query(Container).filter(Container.container_id == container_id, Container.user_id == user.id).first()
-    if not container:
-        raise HTTPException(status_code=404, detail="Container not found or does not belong to the user")
-    
-    try:
-        docker_container = client.containers.get(container.container_id)
-        
-        if docker_container.status != 'running':
-            raise HTTPException(status_code=400, detail="Container is not running")
-        
-        # Execute the command inside the container
-        exec_result = docker_container.exec_run(exec_request.command, tty=True)
-        
-        if exec_result.exit_code == 0:
-            return {"message": "Command executed successfully", "output": exec_result.output.decode("utf-8")}
-        else:
-            return {"message": "Command failed", "output": exec_result.output.decode("utf-8"), "exit_code": exec_result.exit_code}
-
-    except docker.errors.NotFound:
-        raise HTTPException(status_code=404, detail="Docker container not found")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error executing command: {str(e)}")
-
 class ConnectionManager:
     def __init__(self):
         self.active_connections: list[WebSocket] = []
@@ -285,5 +244,78 @@ async def websocket_endpoint(websocket: WebSocket, container_id: str):
     except Exception as e:
         await manager.disconnect(websocket)
 
+class FileSystemItem(BaseModel):
+    name: str
+    path: str
+    parentPath: Optional[str]
+    kind: str
+    handle: Optional[str]
+    content: Optional[str]
+    isSaved: bool
+    isOpen: bool
 
+@docker_router.get("/docker/filesystem/{container_id}")
+def get_filesystem(container_id: str, token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    token_payload = verify_token(token)
+    if token_payload is None:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    
+    user = token_payload.get('sub')
+    user = get_user_by_email(db, user)
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    container = db.query(Container).filter(Container.container_id == container_id, Container.user_id == user.id).first()
+    if not container:
+        raise HTTPException(status_code=404, detail="Container not found or does not belong to the user")
+    
+    try:
+        docker_container = client.containers.get(container.container_id)
+        
+        if docker_container.status != 'running':
+            raise HTTPException(status_code=400, detail="Container is not running")
+        
+        # Execute the command to list all files and directories
+        exec_result_directories = docker_container.exec_run("find /app -type d -exec echo {} \\;", tty=True)
+        exec_result_files = docker_container.exec_run("find /app -type f -exec echo {} \\;", tty=True)
 
+        if exec_result_directories.exit_code != 0 and exec_result_files.exit_code != 0:
+            raise HTTPException(status_code=500, detail="Error retrieving file system structure")
+        
+        directories_output = exec_result_directories.output.decode("utf-8").strip().split("\n")
+        files_output = exec_result_files.output.decode("utf-8").strip().split("\n")
+        
+        files = []
+        for item in directories_output:
+            parent_path = '/'.join(item.split('/')[:-1]) or None
+            files.append(FileSystemItem(
+                name=item.split('/')[-1],
+                path=item,
+                parentPath=parent_path,
+                kind='directory',
+                handle=None,
+                content=None,
+                isSaved=True,
+                isOpen=False
+            ))
+        for item in files_output:
+            parent_path = '/'.join(item.split('/')[:-1]) or None
+            files.append(FileSystemItem(
+                name=item.split('/')[-1],
+                path=item,
+                parentPath=parent_path,
+                kind= 'file',
+                handle=None,
+                content=None,
+                isSaved=True,
+                isOpen=False
+            ))
+        
+        print(files)
+        return files
+
+    except docker.errors.NotFound:
+        raise HTTPException(status_code=404, detail="Docker container not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error retrieving file system structure: {str(e)}")
