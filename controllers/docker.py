@@ -319,3 +319,41 @@ def get_filesystem(container_id: str, token: str = Depends(oauth2_scheme), db: S
         raise HTTPException(status_code=404, detail="Docker container not found")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error retrieving file system structure: {str(e)}")
+    
+
+@docker_router.get("/docker/file-content/{container_id}")
+def get_file_content(container_id: str, file_path: str, token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    token_payload = verify_token(token)
+    if token_payload is None:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    
+    user = token_payload.get('sub')
+    user = get_user_by_email(db, user)
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    container = db.query(Container).filter(Container.container_id == container_id, Container.user_id == user.id).first()
+    if not container:
+        raise HTTPException(status_code=404, detail="Container not found or does not belong to the user")
+    
+    try:
+        docker_container = client.containers.get(container.container_id)
+        
+        if docker_container.status != 'running':
+            raise HTTPException(status_code=400, detail="Container is not running")
+        
+        # Execute the command to read the file content
+        exec_result = docker_container.exec_run(f"cat {file_path}", tty=True)
+
+        if exec_result.exit_code != 0:
+            raise HTTPException(status_code=500, detail="Error retrieving file content")
+        
+        file_content = exec_result.output.decode("utf-8").strip()
+        
+        return file_content
+
+    except docker.errors.NotFound:
+        raise HTTPException(status_code=404, detail="Docker container not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error retrieving file content: {str(e)}")
