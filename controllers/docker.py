@@ -9,6 +9,7 @@ from repositories.database_repository import get_db, get_user_by_email
 from controllers.auth import oauth2_scheme
 import asyncio
 from typing import Optional
+from fastapi import UploadFile, File
 
 from repositories.auth_repository import verify_token
 
@@ -411,3 +412,161 @@ def save_file_content(req:SaveContainerFile, token: str = Depends(oauth2_scheme)
     except Exception as e:
 
         raise HTTPException(status_code=500, detail=f"Error saving file content: {str(e)}")
+    
+class MoveContainerItem(BaseModel):
+    container_id: str
+    source_path: str
+    destination_path: str
+
+@docker_router.post("/docker/move-item")
+def move_item(req: MoveContainerItem, token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    token_payload = verify_token(token)
+    if token_payload is None:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    
+    user = token_payload.get('sub')
+    user = get_user_by_email(db, user)
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    container = db.query(Container).filter(Container.container_id == req.container_id, Container.user_id == user.id).first()
+    if not container:
+        raise HTTPException(status_code=404, detail="Container not found or does not belong to the user")
+    
+    try:
+        docker_container = client.containers.get(container.container_id)
+        
+        if docker_container.status != 'running':
+            raise HTTPException(status_code=400, detail="Container is not running")
+        
+        # Execute the command to move the file or folder
+        exec_result = docker_container.exec_run(f"mv {req.source_path} {req.destination_path}", tty=True)
+
+        if exec_result.exit_code != 0:
+            raise HTTPException(status_code=500, detail="Error moving item")
+        
+        return {"message": "Item moved successfully"}
+
+    except docker.errors.NotFound:
+        raise HTTPException(status_code=404, detail="Docker container not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error moving item: {str(e)}")
+    
+class CreateFolderRequest(BaseModel):
+    container_id: str
+    folder_path: str
+
+@docker_router.post("/docker/create-folder")
+def create_folder(req: CreateFolderRequest, token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    token_payload = verify_token(token)
+    if token_payload is None:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    
+    user = token_payload.get('sub')
+    user = get_user_by_email(db, user)
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    container = db.query(Container).filter(Container.container_id == req.container_id, Container.user_id == user.id).first()
+    if not container:
+        raise HTTPException(status_code=404, detail="Container not found or does not belong to the user")
+    
+    try:
+        docker_container = client.containers.get(container.container_id)
+        
+        if docker_container.status != 'running':
+            raise HTTPException(status_code=400, detail="Container is not running")
+        
+        # Execute the command to create the folder
+        
+        exec_result = docker_container.exec_run(f"mkdir -p {req.folder_path}", tty=True)
+
+        if exec_result.exit_code != 0:
+            raise HTTPException(status_code=500, detail="Error creating folder")
+        
+        return {"message": "Folder created successfully"}
+
+    except docker.errors.NotFound:
+        raise HTTPException(status_code=404, detail="Docker container not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error creating folder: {str(e)}")
+    
+class CreateFileRequest(BaseModel):
+    container_id: str
+    file_path: str
+
+@docker_router.post("/docker/create-file")
+def create_file(req: CreateFileRequest, token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    token_payload = verify_token(token)
+    if token_payload is None:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    
+    user = token_payload.get('sub')
+    user = get_user_by_email(db, user)
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    container = db.query(Container).filter(Container.container_id == req.container_id, Container.user_id == user.id).first()
+    if not container:
+        raise HTTPException(status_code=404, detail="Container not found or does not belong to the user")
+    
+    try:
+        docker_container = client.containers.get(container.container_id)
+        
+        if docker_container.status != 'running':
+            raise HTTPException(status_code=400, detail="Container is not running")
+        
+        # Execute the command to create the file
+        exec_result = docker_container.exec_run(f"touch {req.file_path}", tty=True)
+
+        if exec_result.exit_code != 0:
+            raise HTTPException(status_code=500, detail="Error creating file")
+        
+        return {"message": "File created successfully"}
+
+    except docker.errors.NotFound:
+        raise HTTPException(status_code=404, detail="Docker container not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error creating file: {str(e)}")
+    
+class RemovePathRequest(BaseModel):
+    container_id: str
+    path: str
+
+@docker_router.post("/docker/remove-path")
+def remove_path(req: RemovePathRequest, token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    token_payload = verify_token(token)
+    if token_payload is None:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    
+    user = token_payload.get('sub')
+    user = get_user_by_email(db, user)
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    container = db.query(Container).filter(Container.container_id == req.container_id, Container.user_id == user.id).first()
+    if not container:
+        raise HTTPException(status_code=404, detail="Container not found or does not belong to the user")
+    
+    try:
+        docker_container = client.containers.get(container.container_id)
+        
+        if docker_container.status != 'running':
+            raise HTTPException(status_code=400, detail="Container is not running")
+        
+        # Execute the command to remove the file or folder
+        exec_result = docker_container.exec_run(f"rm -rf {req.path}", tty=True)
+
+        if exec_result.exit_code != 0:
+            raise HTTPException(status_code=500, detail="Error removing path")
+        
+        return {"message": "Path removed successfully"}
+
+    except docker.errors.NotFound:
+        raise HTTPException(status_code=404, detail="Docker container not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error removing path: {str(e)}")
